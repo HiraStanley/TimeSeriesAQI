@@ -1,0 +1,611 @@
+---
+title: "Time Series and Forecasting - Project"
+author: 
+  - "Apoorva Prakash"
+  - "Halleluya Mengesha"
+  - "Hira Stanley"
+date: "2025-02-01"
+output:
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+***
+
+# Data Loading and Cleaning
+
+Lorem Ipsum
+
+**Lorem Ipsum **
+
+### Install Required Libraries
+
+```{r, message=FALSE}
+
+# Install/load needed packages
+# install.packages("lubridate")
+# install.packages("forecast")     
+# install.packages("fpp3")         
+library(fpp3)
+library(tsibble)
+library(forecast)
+library(lubridate)
+library(fable)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tseries)
+
+```
+
+### Load Dataset
+
+```{r, message=FALSE, warning=FALSE}
+
+df <- read.csv("C:/Users/apoor/Downloads/aqi_exo.csv")
+
+```
+
+### Initial Inpection
+
+```{r, message=FALSE, warning=FALSE}
+
+glimpse(df)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+head(df)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Quick summary stats
+summary(df)
+
+```
+
+### Clean the data
+
+```{r, message=FALSE, warning=FALSE}
+
+# Convert Date to Date format
+df <- df %>%
+  mutate(Date = ymd(Date)) %>%
+  arrange(Date)
+
+# Convert pollutant columns to numeric 
+# Handle missing values
+df <- df %>%
+  mutate(across(c("CO", "Ozone", "PM10", "PM25", "NO2"), 
+                ~ as.numeric(na_if(na_if(., "."), ""))))
+
+# Rename columns
+colnames(df) <- c("date", "aqi", "main_pollutant", "site_name", "site_id", "source", 
+                  "co", "ozone", "pm10", "pm25", "nO2", "avg_temp", "avg_humidity",
+                  "avg_wind_speed")
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Check missing values
+(colSums(is.na(df)))
+
+print(paste("Total missing values is: ", sum(is.na(df))))
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Convert to a tsibble
+ts_data <- df %>%
+  select(date, aqi, co, ozone, pm10, pm25, nO2, avg_temp, avg_humidity, avg_wind_speed) %>%
+  # filter(year(date) >= 2010) %>% 
+  as_tsibble(index = date)
+
+```
+
+
+### Plot the data
+
+#### Overall time series
+```{r, message=FALSE, warning=FALSE}
+
+# Plot AQI  over time
+ts_data %>%
+  autoplot(aqi) +
+  labs(title = "NYC Air Quality Index (AQI) Over Time",
+       x = "Date", y = "AQI Value") +
+  theme_minimal()
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Plot all pollutants over time (Facet Grid)
+ts_data %>%
+  pivot_longer(cols = c(co, ozone, pm10, pm25, nO2), names_to = "Pollutant", values_to = "Value") %>%
+  ggplot(aes(x = date, y = Value, color = Pollutant)) +
+  geom_line() +
+  facet_wrap(~Pollutant, scales = "free_y") +
+  labs(title = "Pollutant Trends Over Time", x = "Date", y = "Pollutant Level") +
+  theme_minimal()
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Plot AQI  over time - 2023
+ts_data %>%
+  filter(year(date) == 2023) %>% 
+  autoplot(aqi) +
+  labs(title = "NYC Air Quality Index (AQI) Over Time - 2023",
+       x = "Date", y = "AQI Value") +
+  theme_minimal()
+```
+
+#### Decomposition
+
+```{r, message=FALSE, warning=FALSE}
+
+# Check AQI - seasonal trends
+ts_data %>%
+  # filter(year(date) >= 2022) %>%
+  gg_season(aqi) +
+  labs(title = "Seasonal Pattern of AQI", x = "Month", y = "AQI Value")
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Check AQI - seasonal trends - 2022 to 2024
+ts_data %>%
+  filter(year(date) >= 2020) %>%
+  gg_season(aqi) +
+  labs(title = "Seasonal Pattern of AQI: 2020 to 2024", x = "Month", y = "AQI Value")
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Classical decomposition for AQI
+aqi_decomp <- ts_data %>%
+  # filter(year(date) >= 2023) %>%
+  # filter(year(Date) == 2023) %>%
+  model(classical_decomposition(aqi, type = "additive")) %>%
+  components()
+
+# Plot decomposed components
+aqi_decomp %>%
+  autoplot() +
+  labs(title = "Classical Decomposition of AQI Time Series- 2023 to 2024")
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+# STL(Seasonal-Trend Decomposition using Loess) - for AQI
+ts_data %>%
+  # filter(year(date) >= 2019) %>%
+  model(STL(aqi ~ season(window = "periodic"))) %>%
+  components() %>%
+  autoplot() +
+  labs(title = "STL Decomposition of AQI Time Series")
+
+```
+
+#### Augmented Dickey-Fuller (ADF) test
+
+```{r, message=FALSE, warning=FALSE}
+
+# Perform the ADF test
+adf_result <- adf.test(ts_data$aqi, alternative = "stationary")
+print(adf_result)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# ACF plot to check autocorrelation
+ts_data %>%
+  ACF(`aqi`) %>%
+  autoplot() +
+  labs(title = "ACF Plot of NYC AQI",
+       x = "Lag", y = "Autocorrelation")
+
+# PACF plot to check partial autocorrelation
+ts_data %>%
+  PACF(`aqi`) %>%
+  autoplot() +
+  labs(title = "PACF Plot of NYC AQI",
+       x = "Lag", y = "Partial Autocorrelation")
+
+
+```
+
+### Check Stationarity
+
+**<u>Observations</u>**:
+\
+
+**1. Trend**: 
+
+* "NYC Air Quality Index (AQI) Over Time" plot shows a slightly decreasing trend over time.
+* This suggests the mean and the variance are not constant.
+\
+
+→ **Data requires differencing**. We should use trend-based model (**ARIMA** with differencing)
+\
+
+→ **Non-Seasonal Differencing term: d = 1**
+\
+
+**2. Seasonality**: 
+
+* "NYC Air Quality Index (AQI) Over Time" plot shows some seasonality
+* "Seasonal Trend Decomposition for AQI" plot shows a strong seasonal component with AQI values repeating periodically.
+\
+
+→ **We should use seasonal differencing approach** (**SARIMA**)
+\
+
+→ **Seasonal Differencing : D = 1, S = 3**
+\
+
+**3. ACF**: 
+
+* Repeated spikes every 3 days are present. This means 3-day cycle/seasonality is present possibly due to external factors)
+* Gradual decline can be seen. This confirms trend effect.
+\
+
+→ **MA (q, Q)**: **q = 1, Q = 1** (q from ACF cutoff and, Q represents one past seasonal MA term included at lag 3)
+
+**4. PACF**: 
+
+* High PCAF at Lag 1 - AQI today is strongly correlated with AQI yesterday (Autoregressive Process AR(1))
+* Spikes every 3 days - Seasonality
+\
+
+→ **AR (p, P)**: **p = 1, P = 1** (from ACF cutoff and, P represents one past seasonal AR term is included at lag 3)
+\
+
+**<u>Conclusion</u>: Data is non-stationary despite the ADF test since it does not take into account strong trend and seasonal patterns.**
+
+\newpage
+
+### Fit Models and Forecast
+
+#### Fit Baseline Models (Naive & S-Naive)
+
+* **Note**: Simple models as a benchmark: to see if complex models outperform simple predictions.
+
+```{r}
+#Splitting into train and test (year 2024) data
+train_data <- ts_data %>% filter(year(date) < 2024)
+test_data <- ts_data %>% filter(year(date) == 2024)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+
+# Naïve model 
+naive_model <- train_data %>%
+  model(NAIVE(aqi))
+
+# Report
+
+report(naive_model)
+
+```
+```{r, message=FALSE, warning=FALSE}
+
+# Seasonal Naïve Model 
+snaive_model <- train_data %>%
+  model(SNAIVE(aqi ~ lag("3 days")))
+
+# Report
+report(snaive_model)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Filter data for plot purposes
+ts_data_filtered <- train_data %>%
+  filter(year(date) > 2020)
+
+# Forecast for the year 2024
+naive_forecast <- forecast(naive_model, new_data = test_data)
+snaive_forecast <- forecast(snaive_model, new_data = test_data)
+
+# Plot forecasts
+autoplot(ts_data_filtered, aqi) +
+  autolayer(naive_forecast, series= "Naive Forecast", PI = FALSE) +
+  labs(title = "Naïve Forecast (Baseline)")
+
+autoplot(ts_data_filtered, aqi) +
+  autolayer(snaive_forecast, series= "Snaive Forecast", PI = FALSE) +
+  labs(title = "Seasonal Naïve Forecast (3-Day Cycle)")
+
+```
+
+\
+
+**<u>Observations</u>**:
+\
+
+**1. Naive Model (remains the same as last observed value):**
+
+* **No trend** 
+* **No seasonality**
+
+→ Very weak baseline model (expected). Only useful for comparison—real AQI data has seasonality & trends.
+\
+
+**2. Snaive (repeats last season's value):**
+
+* No trend
+* Short-term seasonality
+
+→ Improves naïve model but still too simple.
+
+#### Fit ARIMA/SARIMA 
+
+```{r, message=FALSE, warning=FALSE}
+
+# Fit Auto ARIMA model
+auto_arima_model <- train_data %>%
+  model(ARIMA(aqi))
+
+# Report
+report(auto_arima_model)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+# Forecast for the year 2024
+auto_arima_forecast <- forecast(auto_arima_model, new_data=test_data)
+
+# Plot forecast
+autoplot (ts_data_filtered, aqi) + 
+  autolayer(auto_arima_forecast, series= "Arima Forecast", PI = FALSE) +
+  labs(title = "AQI Forecast using Auto ARIMA")
+
+```
+\
+
+**<u>Observations</u>**:
+\
+
+**ARIMA Model (selects the best ARIMA/SARIMA model using AIC/BIC):**
+
+\
+
+```{r, message=FALSE, warning=FALSE}
+
+gg_tsresiduals(auto_arima_model)
+
+```
+\
+
+**<u>Observations</u>**:
+\
+
+* Almost all spikes are outside the blue bounds in ACF suggesting potential **missing seasonal effects** or  **exogenous factors **. 
+* A more complex model  might improve fit. We will try to manually determine/adjust SARIMA parameters (p, d, q) and (P, D, Q, S).
+
+\
+```{r, message=FALSE, warning=FALSE}
+
+sarima_model_manual <- train_data %>%
+  model(ARIMA(aqi ~ pdq(1,1,1) + PDQ(1,1,1,3)))  # (S=3 for 3-day seasonality)
+
+report(sarima_model_manual)
+```
+```{r}
+
+# Forecast using SARIMA
+sarima_forecast_manual <- forecast(sarima_model_manual, new_data = test_data)
+
+# Plot the new forecast
+autoplot(ts_data_filtered, aqi) + 
+  autolayer(sarima_forecast_manual, series= "SARIMA Forecast", PI = TRUE) +
+  labs(title = "AQI Forecast using Manual SARIMA (S=3)")
+
+```
+
+```{r}
+
+gg_tsresiduals(sarima_model_manual)
+
+```
+\
+
+**<u>Observations</u>**:
+\
+
+* The spikes outside the blue bounds in ACF suggest potential **missing seasonal effects** or  **exogenous factors ** (e.g., weather, traffic data).
+* We will try  **SARIMAX ** ( **SARIMA  +  exogenous variables **) to account for other AQI influences.
+
+\
+
+```{r}
+# Compare model performance
+
+# AIC and BIC separately
+aic_bic_tbl <- bind_rows(
+  glance(naive_model) %>% mutate(Model = "Naïve"),
+  glance(snaive_model) %>% mutate(Model = "S-Naïve"),
+  glance(auto_arima_model) %>% mutate(Model = "Auto ARIMA"),
+  glance(sarima_model_manual) %>% mutate(Model = "Manual SARIMA")
+) %>%
+  select(Model, AIC, BIC)
+
+# RMSE and other accuracy metrics
+accuracy_tbl <- bind_rows(
+  accuracy(naive_model) %>% mutate(Model = "Naïve"),
+  accuracy(snaive_model) %>% mutate(Model = "S-Naïve"),
+  accuracy(auto_arima_model) %>% mutate(Model = "Auto ARIMA"),
+  accuracy(sarima_model_manual) %>% mutate(Model = "Manual SARIMA")
+) %>%
+  select(Model, ME, RMSE, MAE, MASE)
+
+# Print accuracy and model comparison
+print(accuracy_tbl)
+print(aic_bic_tbl)
+```
+\
+
+**<u>Observations</u>**:
+\
+
+**Manual SARIMA is the best model:**:
+
+* Lowest RMSE (15.88) → Best predictive accuracy
+* Lowest MAE (11.07) → Least forecasting error on average
+* Lower AIC → Better model fit (better accuracy)
+* Lower BIC → Reduced complexity (penalty on extra parameters)
+
+indicate a better model penalize model complexity, so this suggests SARIMA is both accurate and efficient.
+
+The spikes outside the blue bounds in ACF suggest potential **missing seasonal effects** or  **exogenous factors ** (e.g., weather, traffic data).
+* We will try  **SARIMAX ** ( **SARIMA  +  exogenous variables **) to account for other AQI influences.
+
+\
+
+
+#### Fit SARIMAX
+
+* **Note**: Including wether data (temperature, wind and humidity)
+
+```{r}
+
+# Fit SARIMAX model with exogenous variables
+sarimax_model <- train_data %>%
+  model(
+    SARIMAX = ARIMA(aqi ~ avg_temp + avg_humidity + avg_wind_speed +
+                        pdq(1,1,1) + PDQ(1,1,1,3))  # Weekly seasonality
+  )
+
+# Print model summary
+report(sarimax_model)
+
+```
+```{r}
+# Forecast using SARIMAX
+sarimax_forecast <- forecast(sarimax_model, new_data = test_data)
+
+# Plot the new forecast
+autoplot(ts_data_filtered, aqi) + 
+autolayer(sarimax_forecast, series= "SARIMAX Forecast", PI = TRUE) +
+labs(title = "AQI Forecast using SARIMAX - with Temperature, Humidity and Wind Speed")
+```
+
+```{r}
+gg_tsresiduals(sarimax_model)
+```
+
+```{r}
+# Compare model performance
+
+# AIC and BIC separately
+aic_bic_tbl <- bind_rows(
+  glance(naive_model) %>% mutate(Model = "Naïve"),
+  glance(snaive_model) %>% mutate(Model = "S-Naïve"),
+  glance(auto_arima_model) %>% mutate(Model = "Auto ARIMA"),
+  glance(sarima_model_manual) %>% mutate(Model = "Manual SARIMA"),
+  glance(sarimax_model) %>% mutate(Model = "Manual SARIMAX")
+) %>%
+  select(Model, AIC, BIC)
+
+# RMSE and other accuracy metrics
+accuracy_tbl <- bind_rows(
+  accuracy(naive_model) %>% mutate(Model = "Naïve"),
+  accuracy(snaive_model) %>% mutate(Model = "S-Naïve"),
+  accuracy(auto_arima_model) %>% mutate(Model = "Auto ARIMA"),
+  accuracy(sarima_model_manual) %>% mutate(Model = "Manual SARIMA"),
+  accuracy(sarimax_model) %>% mutate(Model = "SARIMAX")
+) %>%
+  select(Model, ME, RMSE, MAE, MASE)
+
+# Print accuracy and model comparison
+print(accuracy_tbl)
+print(aic_bic_tbl)
+```
+\
+
+**<u>Observations</u>**:
+\
+
+**SARIMAX seems to be the best model:**:
+
+* Lowest RMSE (14.63) → Best predictive accuracy
+* Lowest MAE (10.32) → Least forecasting error on average
+* Lowest MASE (0.56) → Outperforms naïve benchmarkmodels (< 1)
+* Minimal Mean Error (0.046) → Lower bias in its predictions
+* Lowest AIC → Better model fit (better accuracy)
+* Lowest BIC → Reduced complexity (penalty on extra parameters)
+
+\
+
+#### Supplementary Question
+
+* **How do weather conditions affect AQI?**
+
+
+
+```{r}
+#install.packages("corrr")
+library(corrr)
+
+# Compute correlations using corrr package
+weather_cor <- ts_data %>%
+  select(aqi, avg_temp, avg_humidity, avg_wind_speed) %>%
+  correlate()
+
+print(weather_cor)
+
+# View correlations between aqi and other variables
+aqi_correlations <- weather_cor %>%
+  focus(aqi)
+
+print(aqi_correlations)
+
+ts_data$aqi <- as.numeric(ts_data$aqi) #since it is int and others num
+
+# Regression model: AQI vs. Weather conditions
+weather_model <- lm(aqi ~ avg_temp + avg_humidity + avg_wind_speed, data = ts_data)
+summary(weather_model)
+
+# Plot residuals to check assumptions
+plot(weather_model)
+```
+
+\
+
+**<u>Observations</u>**:
+\
+
+
+* Wind Speed has the strongest negative correlation (-0.28) - Higher wind speeds likely help disperse pollutants, reducing AQI levels.
+* Temperature has a weak positive correlation (0.086) - Warmer temperatures might contribute to higher AQI due to increased chemical reactions forming secondary pollutants (e.g., ozone).
+* Humidity shows minimal correlation (-0.008) - While humidity can impact certain pollutants (e.g., particulate matter), its overall effect on AQI in this dataset is weak.
+
+\
+
+
+#### ~ End of Document ~
+
+
+
+
